@@ -8,7 +8,7 @@ use std::{
 };
 
 use clap::{App, Arg};
-
+use gethostname::gethostname;
 
 fn main() -> std::io::Result<()> {
     let matches = App::new("SvishtovChat")
@@ -53,7 +53,7 @@ fn main() -> std::io::Result<()> {
         let ip = matches.value_of("address").unwrap_or("127.0.0.1");
         let port = matches.value_of("port").unwrap_or("6000");
         let address = ip.to_string() + ":" + port;
-        let username = matches.value_of("username").unwrap_or("").to_string();
+        let username = matches.value_of("username").unwrap_or(&gethostname().into_string().unwrap()).to_string();
         if username.is_empty() {
             println!("Must enter username <-u username>");
             exit(0);

@@ -1,6 +1,7 @@
 #![allow(unused_imports)]
 
-use std::{convert::TryInto, error::Error, io::{self, ErrorKind, Read, Write}, net::TcpStream, process::exit, sync::{Arc, Mutex, MutexGuard, mpsc}, thread::{self, sleep}, time::Duration};
+use std::{convert::TryInto, error::Error, io::{self, ErrorKind, Read, Write}, mem::size_of_val, net::TcpStream, process::exit, sync::{Arc, Mutex, MutexGuard, mpsc}, thread::{self, sleep}, time::{Duration, SystemTime, UNIX_EPOCH}};
+use chrono::{DateTime, Local, Utc};
 use termion::{event::Key, input::{MouseTerminal, TermRead}, raw::IntoRawMode, screen::AlternateScreen};
 use tui::{
     backend::TermionBackend,
@@ -14,21 +15,28 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::{message::Msg, events::*};
 
+const INFO_COLOR: Color = Color::LightBlue;
+const ERR_COLOR: Color = Color::LightRed;
+
 pub struct Client {
-	pub name: String
+	pub name: String,
+    pub local_color: Color,
+    pub remote_color: Color
 }
 
 impl Client {
 	fn new(username: String) -> Client{
 		return Client {
-			name: username
+			name: username,
+            local_color: Color::White,
+            remote_color: Color::White
 		}
 	}
 }
 
 struct App {
 	input: String,
-	messages: Vec<String>
+	messages: Vec<Msg>
 }
 
 impl Default for App {
@@ -42,14 +50,16 @@ impl Default for App {
 
 struct Parsed {
     should_print: bool,
-    content: String
+    content: String,
+    color: Color
 }
 
 impl Default for Parsed {
     fn default() -> Parsed {
         Parsed {
             should_print: false,
-            content: String::new()
+            content: String::new(),
+            color: Color::White
         }
     }
 }
@@ -77,6 +87,7 @@ pub fn start(addr: String, username: String) -> Result<(), Box<dyn Error>> {
 	let app = Arc::new(Mutex::new(App::default()));
 	
     let (tx, rx) = mpsc::channel::<Msg>();
+    let (tx_i, rx_i) = mpsc::channel::<Msg>();
 
     let shared_tx = Arc::new(Mutex::new(tx));
 
@@ -85,10 +96,11 @@ pub fn start(addr: String, username: String) -> Result<(), Box<dyn Error>> {
 		match stream.read_exact(&mut buf_sz) {
 			Ok(_) => {
 				let json_sz = usize::from_be_bytes(buf_sz);
-                let mut msg_buf: Vec<u8> = vec![0, json_sz.try_into().unwrap()];
+                let mut msg_buf: Vec<u8> = vec![0; json_sz];
                 match stream.read_exact(&mut msg_buf){
                     Ok(_) => {
                         let msg: Msg = serde_json::from_str(String::from_utf8(msg_buf).unwrap().as_str()).unwrap();
+                        tx_i.send(msg).unwrap();
                     },
                     Err(ref err) if err.kind() == ErrorKind::WouldBlock => (),
                     Err(_) => {
@@ -107,7 +119,10 @@ pub fn start(addr: String, username: String) -> Result<(), Box<dyn Error>> {
         match rx.try_recv() {
             Ok(msg) => {
                 let outbound_json = serde_json::to_string(&msg).unwrap();
+                // let outbound_json 
 				let outbound = outbound_json.as_bytes();
+                // println!("{}", size_of_val(outbound));
+                stream.write_all(&size_of_val(outbound).to_be_bytes()).unwrap();
                 stream.write_all(&outbound).unwrap();
             },
             Err(mpsc::TryRecvError::Empty) => (),
@@ -120,6 +135,16 @@ pub fn start(addr: String, username: String) -> Result<(), Box<dyn Error>> {
 
     loop {
 		terminal.draw(|f| {
+            let mut app_t = app.lock().unwrap();
+            match rx_i.try_recv() {
+                Ok(msg) => {
+                    if msg.sender != client.lock().unwrap().name {
+                        app_t.messages.push(msg);
+                    }
+                }
+                Err(mpsc::TryRecvError::Empty) => (),
+                Err(mpsc::TryRecvError::Disconnected) => return
+            }
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
                 .margin(0)
@@ -133,7 +158,6 @@ pub fn start(addr: String, username: String) -> Result<(), Box<dyn Error>> {
                 )
                 .split(f.size());
 
-            let app_t = app.lock().unwrap();
             let input = Paragraph::new(app_t.input.as_ref())
                 .style(Style::default())
                 .block(Block::default().borders(Borders::NONE));
@@ -150,7 +174,10 @@ pub fn start(addr: String, username: String) -> Result<(), Box<dyn Error>> {
                 .iter()
                 .enumerate()
                 .map(|(i, m)| {
-                    let content = vec![Spans::from(Span::raw(format!("{}: {}", i, m)))];
+                    let style = Style::default().fg(m.color);
+                    let local: DateTime<Local> = DateTime::from(m.timestamp);
+                    let time = local.format("%H:%M:%S").to_string();
+                    let content = vec![Spans::from(Span::styled(format!("{} {}: {}", time,  m.sender, m.content), style))];
                     ListItem::new(content)
                 })
                 .collect();
@@ -171,9 +198,9 @@ pub fn start(addr: String, username: String) -> Result<(), Box<dyn Error>> {
                     let msg = app_t.input.drain(..).collect();
                     let parse = parse_message(msg, shared_tx.lock().unwrap(), client.lock().unwrap());
                     if parse.should_print {
-                        app_t.messages.push(parse.content);
+                        let cl = client.lock().unwrap();
+                        app_t.messages.push(Msg{sender: (&cl.name).to_string(), content: parse.content, color: parse.color, timestamp: Utc::now()});
                     }
-                    
                 },
                 Key::Backspace => {
                     app_t.input.pop();
@@ -191,6 +218,7 @@ pub fn start(addr: String, username: String) -> Result<(), Box<dyn Error>> {
 }
 
 fn parse_message(msg: String, tx: MutexGuard<mpsc::Sender<Msg>>, mut client: MutexGuard<Client>) -> Parsed {
+    let msg = msg.trim().to_string();
     if msg.starts_with('/') {
         let msg: &str = msg[1..].as_ref();
         let cmd = msg.split(' ').collect::<Vec<&str>>();
@@ -200,31 +228,132 @@ fn parse_message(msg: String, tx: MutexGuard<mpsc::Sender<Msg>>, mut client: Mut
                 if cmd.len() != 2 {
                     return Parsed {
                         should_print: true,
-                        content: String::from("Incorrect usage of command! /rename <name>")
+                        content: String::from("Incorrect usage of command! /rename <name>"),
+                        color: ERR_COLOR
                     }
                 }
                 let arg = cmd[1];
-                //change name in client
                 client.name = String::from(arg);
-                Parsed::default()
+                return Parsed {
+                    should_print: true,
+                    content: String::from("Changed name to: ".to_owned() + &client.name),
+                    color: INFO_COLOR
+                }
             }
             "info" => {
                 return Parsed {
                     should_print: true,
-                    content: (*client.name).to_string()
+                    content: (*client.name).to_string(),
+                    color: INFO_COLOR
+                }
+            }
+            "remote-color" => {
+                if cmd.len() != 2 {
+                    return Parsed {
+                        should_print: true,
+                        content: String::from("Incorrect usage of command! /remote-color <color>"),
+                        color: ERR_COLOR
+                    }
+                }
+                let arg = cmd[1];
+                let out_str: String;
+                let mut color = Color::White;
+                match color_from_name(arg) {
+                    Ok(_color) => {
+                        out_str = String::from("Changed color to ".to_owned() + arg);
+                        color = _color;
+                    }
+                    Err(e) => {
+                        out_str = e;
+                    }
+                }
+                client.remote_color = color;
+                return Parsed {
+                    should_print: true,
+                    content: out_str,
+                    color: color,
+                }
+            }
+            "local-color" => {
+                if cmd.len() != 2 {
+                    return Parsed {
+                        should_print: true,
+                        content: String::from("Incorrect usage of command! /local-color <color>"),
+                        color: ERR_COLOR
+                    }
+                }
+                let arg = cmd[1];
+                let out_str: String;
+                let mut color = Color::White;
+                match color_from_name(arg) {
+                    Ok(_color) => {
+                        out_str = String::from("Changed color to ".to_owned() + arg);
+                        color = _color;
+                    }
+                    Err(e) => {
+                        out_str = e;
+                    }
+                }
+                client.local_color = color;
+                return Parsed {
+                    should_print: true,
+                    content: out_str,
+                    color: color,
                 }
             }
             _ => {
                 Parsed {
                     should_print: true,
-                    content: String::from("Unknown command. Try /help")
+                    content: String::from("Unknown command. Try /help"),
+                    color: ERR_COLOR
                 }
             }
         }
     } else {
+        tx.send(Msg{content: msg.clone().to_owned(), 
+            sender: (*client.name).to_string().to_owned(), 
+            color: client.remote_color, 
+            timestamp: Utc::now()})
+            .unwrap();
         Parsed {
             should_print: true,
-            content: msg
+            content: msg,
+            color: client.local_color
+        }
+    }
+}
+
+// fn get_time_ms() -> u128 {
+//     SystemTime::now()
+//         .duration_since(UNIX_EPOCH)
+//         .unwrap()
+//         .as_millis()
+// }
+
+// fn get_time_fmt(ms: u128) -> Duration {
+//     Duration::from_millis(ms.try_into().unwrap()).
+// }
+
+fn color_from_name(color: &str) -> Result<Color, String> {
+    match color.to_lowercase().as_str() {
+        "black" => {Ok(Color::Black)}
+        "red" => {Ok(Color::Red)}
+        "green" => {Ok(Color::Green)}
+        "yellow" => {Ok(Color::Yellow)}
+        "blue" => {Ok(Color::Blue)}
+        "magenta" => {Ok(Color::Magenta)}
+        "cyan" => {Ok(Color::Cyan)}
+        "gray" => {Ok(Color::Gray)}
+        "darkgray" => {Ok(Color::DarkGray)}
+        "lightred" => {Ok(Color::LightRed)}
+        "lightgreen" => {Ok(Color::LightGreen)}
+        "lightyellow" => {Ok(Color::LightYellow)}
+        "lightblue" => {Ok(Color::LightBlue)}
+        "lightmagenta" => {Ok(Color::LightMagenta)}
+        "lightcyan" => {Ok(Color::LightCyan)}
+        "white" => {Ok(Color::White)}
+        _ => {
+            Err(String::from("No such color. Try /help colors"))
         }
     }
 }
