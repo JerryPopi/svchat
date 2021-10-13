@@ -15,13 +15,13 @@ use unicode_width::UnicodeWidthStr;
 use crate::{message::Msg, events::*};
 
 pub struct Client {
-	pub name: Vec<char>
+	pub name: String
 }
 
 impl Client {
 	fn new(username: String) -> Client{
 		return Client {
-			name: username.chars().collect()
+			name: username
 		}
 	}
 }
@@ -169,7 +169,7 @@ pub fn start(addr: String, username: String) -> Result<(), Box<dyn Error>> {
                 }
                 Key::Char('\n') => {
                     let msg = app_t.input.drain(..).collect();
-                    let parse = parse_message(msg, shared_tx.lock().unwrap());
+                    let parse = parse_message(msg, shared_tx.lock().unwrap(), client.lock().unwrap());
                     if parse.should_print {
                         app_t.messages.push(parse.content);
                     }
@@ -190,11 +190,29 @@ pub fn start(addr: String, username: String) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn parse_message(msg: String, tx: MutexGuard<mpsc::Sender<Msg>>) -> Parsed {
+fn parse_message(msg: String, tx: MutexGuard<mpsc::Sender<Msg>>, mut client: MutexGuard<Client>) -> Parsed {
     if msg.starts_with('/') {
-        match msg[1..].as_ref() {
+        let msg: &str = msg[1..].as_ref();
+        let cmd = msg.split(' ').collect::<Vec<&str>>();
+
+        match cmd[0] {
             "rename" => {
+                if cmd.len() != 2 {
+                    return Parsed {
+                        should_print: true,
+                        content: String::from("Incorrect usage of command! /rename <name>")
+                    }
+                }
+                let arg = cmd[1];
+                //change name in client
+                client.name = String::from(arg);
                 Parsed::default()
+            }
+            "info" => {
+                return Parsed {
+                    should_print: true,
+                    content: (*client.name).to_string()
+                }
             }
             _ => {
                 Parsed {
@@ -204,7 +222,10 @@ fn parse_message(msg: String, tx: MutexGuard<mpsc::Sender<Msg>>) -> Parsed {
             }
         }
     } else {
-        Parsed::default()
+        Parsed {
+            should_print: true,
+            content: msg
+        }
     }
 }
 
