@@ -43,6 +43,13 @@ fn main() -> std::io::Result<()> {
                 .help("Username to be identified with")
                 .takes_value(true),
         )
+        .arg(
+            Arg::with_name("config")
+            .short("c")
+            .long("config")
+            .help("Path to config file (defaults to .config/svchat/svchat.ini)")
+            .takes_value(true)
+        )
         .get_matches();
 
     if matches.is_present("server") {

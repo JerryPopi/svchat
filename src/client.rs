@@ -70,7 +70,6 @@ pub fn start(addr: String, username: String) -> Result<(), Box<dyn Error>> {
 		quit();
 	}).expect("Failed to set ctrlc handler");
 
-    #[allow(unused_variables)]
 	let client = Arc::new(Mutex::new(Client::new(username)));
 
 	let mut stream = TcpStream::connect(addr).expect("Failed to connect to server.");
@@ -119,9 +118,9 @@ pub fn start(addr: String, username: String) -> Result<(), Box<dyn Error>> {
         match rx.try_recv() {
             Ok(msg) => {
                 let outbound_json = serde_json::to_string(&msg).unwrap();
-                // let outbound_json 
+
 				let outbound = outbound_json.as_bytes();
-                // println!("{}", size_of_val(outbound));
+
                 stream.write_all(&size_of_val(outbound).to_be_bytes()).unwrap();
                 stream.write_all(&outbound).unwrap();
             },
@@ -173,7 +172,7 @@ pub fn start(addr: String, username: String) -> Result<(), Box<dyn Error>> {
                 .messages
                 .iter()
                 .enumerate()
-                .map(|(i, m)| {
+                .map(|(_i, m)| {
                     let style = Style::default().fg(m.color);
                     let local: DateTime<Local> = DateTime::from(m.timestamp);
                     let time = local.format("%H:%M:%S").to_string();
@@ -247,6 +246,7 @@ fn parse_message(msg: String, tx: MutexGuard<mpsc::Sender<Msg>>, mut client: Mut
                     color: INFO_COLOR
                 }
             }
+            "open" => todo!(),
             "remote-color" => {
                 if cmd.len() != 2 {
                     return Parsed {
@@ -271,7 +271,7 @@ fn parse_message(msg: String, tx: MutexGuard<mpsc::Sender<Msg>>, mut client: Mut
                 return Parsed {
                     should_print: true,
                     content: out_str,
-                    color: color,
+                    color,
                 }
             }
             "local-color" => {
@@ -298,7 +298,7 @@ fn parse_message(msg: String, tx: MutexGuard<mpsc::Sender<Msg>>, mut client: Mut
                 return Parsed {
                     should_print: true,
                     content: out_str,
-                    color: color,
+                    color,
                 }
             }
             _ => {
@@ -322,17 +322,6 @@ fn parse_message(msg: String, tx: MutexGuard<mpsc::Sender<Msg>>, mut client: Mut
         }
     }
 }
-
-// fn get_time_ms() -> u128 {
-//     SystemTime::now()
-//         .duration_since(UNIX_EPOCH)
-//         .unwrap()
-//         .as_millis()
-// }
-
-// fn get_time_fmt(ms: u128) -> Duration {
-//     Duration::from_millis(ms.try_into().unwrap()).
-// }
 
 fn color_from_name(color: &str) -> Result<Color, String> {
     match color.to_lowercase().as_str() {

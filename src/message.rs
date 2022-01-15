@@ -1,5 +1,3 @@
-use std::time::SystemTime;
-
 use chrono::{DateTime, Utc};
 use serde::{Serialize, Deserialize};
 use tui::style::Color;
