@@ -13,10 +13,11 @@ use tui::{
 };
 use unicode_width::UnicodeWidthStr;
 
-use crate::{message::Msg, events::*};
+use crate::{structs::{Msg, ConnectionRequest, MsgType, MessageWrapper}, events::*, config::Config};
 
-const INFO_COLOR: Color = Color::LightBlue;
-const ERR_COLOR: Color = Color::LightRed;
+const COLOR_INFO: Color = Color::LightBlue;
+const COLOR_ERR: Color = Color::LightRed;
+const COLORS: [&str; 16] = ["black", "red","green", "yellow", "blue", "magenta", "cyan", "gray", "darkgray", "lightred", "lightgreen", "lightyellow", "lightblue", "lightmagenta", "lightcyan", "white"];
 
 pub struct Client {
 	pub name: String,
@@ -64,13 +65,33 @@ impl Default for Parsed {
     }
 }
 
-pub fn start(addr: String, username: String) -> Result<(), Box<dyn Error>> {
+fn request_connection(username: &str, room: String, stream: &mut TcpStream) -> Result<(), Box<dyn Error>> {
+    let request = ConnectionRequest {
+        username: username.to_string(),
+        room: room
+    };
+
+    let serialized_request = serde_json::to_string(&request)?;
+
+    let request_string = serde_json::to_string(&MessageWrapper {
+        msg_type: MsgType::ConnectionRequest,
+        msg: serialized_request
+    })?;
+
+    stream.write_all(&size_of_val(request_string.as_bytes()).to_be_bytes())?;
+    stream.write_all(request_string.as_bytes())?;
+    return Ok(());
+}
+
+pub fn start(addr: String, username: String, config: Config) -> Result<(), Box<dyn Error>> {
 	ctrlc::set_handler(move || {
 		println!("Exiting...");
 		quit();
 	}).expect("Failed to set ctrlc handler");
 
-	let client = Arc::new(Mutex::new(Client::new(username)));
+    let username: &str = &username;
+
+	let client = Arc::new(Mutex::new(Client::new(username.to_string())));
 
 	let mut stream = TcpStream::connect(addr).expect("Failed to connect to server.");
 	stream.set_nonblocking(true)?;
@@ -89,6 +110,8 @@ pub fn start(addr: String, username: String) -> Result<(), Box<dyn Error>> {
     let (tx_i, rx_i) = mpsc::channel::<Msg>();
 
     let shared_tx = Arc::new(Mutex::new(tx));
+
+    request_connection(username, String::from("room"), &mut stream)?;
 
     thread::spawn(move || loop {
 		let mut buf_sz = [0; std::mem::size_of::<usize>()];
@@ -223,27 +246,60 @@ fn parse_message(msg: String, tx: MutexGuard<mpsc::Sender<Msg>>, mut client: Mut
         let cmd = msg.split(' ').collect::<Vec<&str>>();
 
         match cmd[0] {
-            "rename" => {
+            "help" => {
+                if cmd.len() != 2 {
+                    Parsed {
+                        should_print: true,
+                        content: format!("Available commands: /help, /nick <nickname>, /color <color>"),
+                        color: COLOR_INFO
+                    }
+                } else {
+                    match cmd[1] {
+                        "nick" => {
+                            Parsed {
+                                should_print: true,
+                                content: format!("Usage of nick: /nick <nickname>"),
+                                color: COLOR_INFO
+                            }
+                        },
+                        "color" => {
+                            Parsed {
+                                should_print: true,
+                                content: format!("Available colors: {}", COLORS.join(", ")),
+                                color: COLOR_INFO
+                            }
+                        },
+                        _ => {
+                            Parsed {
+                                should_print: true,
+                                content: format!("Available commands: /help, /nick <nickname>, /color <color>"),
+                                color: COLOR_INFO
+                            }
+                        }
+                    }
+                }
+            }
+            "nick" => {
                 if cmd.len() != 2 {
                     return Parsed {
                         should_print: true,
-                        content: String::from("Incorrect usage of command! /rename <name>"),
-                        color: ERR_COLOR
+                        content: format!("Incorrect usage of command! /nick <name>"),
+                        color: COLOR_ERR
                     }
                 }
                 let arg = cmd[1];
                 client.name = String::from(arg);
                 return Parsed {
                     should_print: true,
-                    content: String::from("Changed name to: ".to_owned() + &client.name),
-                    color: INFO_COLOR
+                    content: format!("Changed name to: {}", &client.name),
+                    color: COLOR_INFO
                 }
             }
             "info" => {
                 return Parsed {
                     should_print: true,
                     content: (*client.name).to_string(),
-                    color: INFO_COLOR
+                    color: COLOR_INFO
                 }
             }
             "open" => todo!(),
@@ -251,8 +307,8 @@ fn parse_message(msg: String, tx: MutexGuard<mpsc::Sender<Msg>>, mut client: Mut
                 if cmd.len() != 2 {
                     return Parsed {
                         should_print: true,
-                        content: String::from("Incorrect usage of command! /remote-color <color>"),
-                        color: ERR_COLOR
+                        content: format!("Incorrect usage of command! /remote-color <color>"),
+                        color: COLOR_ERR
                     }
                 }
                 let arg = cmd[1];
@@ -279,7 +335,7 @@ fn parse_message(msg: String, tx: MutexGuard<mpsc::Sender<Msg>>, mut client: Mut
                     return Parsed {
                         should_print: true,
                         content: String::from("Incorrect usage of command! /local-color <color>"),
-                        color: ERR_COLOR
+                        color: COLOR_ERR
                     }
                 }
                 let arg = cmd[1];
@@ -305,7 +361,7 @@ fn parse_message(msg: String, tx: MutexGuard<mpsc::Sender<Msg>>, mut client: Mut
                 Parsed {
                     should_print: true,
                     content: String::from("Unknown command. Try /help"),
-                    color: ERR_COLOR
+                    color: COLOR_ERR
                 }
             }
         }
@@ -325,22 +381,22 @@ fn parse_message(msg: String, tx: MutexGuard<mpsc::Sender<Msg>>, mut client: Mut
 
 fn color_from_name(color: &str) -> Result<Color, String> {
     match color.to_lowercase().as_str() {
-        "black" => {Ok(Color::Black)}
-        "red" => {Ok(Color::Red)}
-        "green" => {Ok(Color::Green)}
-        "yellow" => {Ok(Color::Yellow)}
-        "blue" => {Ok(Color::Blue)}
-        "magenta" => {Ok(Color::Magenta)}
-        "cyan" => {Ok(Color::Cyan)}
-        "gray" => {Ok(Color::Gray)}
-        "darkgray" => {Ok(Color::DarkGray)}
-        "lightred" => {Ok(Color::LightRed)}
-        "lightgreen" => {Ok(Color::LightGreen)}
-        "lightyellow" => {Ok(Color::LightYellow)}
-        "lightblue" => {Ok(Color::LightBlue)}
+        "black"        => {Ok(Color::Black)}
+        "red"          => {Ok(Color::Red)}
+        "green"        => {Ok(Color::Green)}
+        "yellow"       => {Ok(Color::Yellow)}
+        "blue"         => {Ok(Color::Blue)}
+        "magenta"      => {Ok(Color::Magenta)}
+        "cyan"         => {Ok(Color::Cyan)}
+        "gray"         => {Ok(Color::Gray)}
+        "darkgray"     => {Ok(Color::DarkGray)}
+        "lightred"     => {Ok(Color::LightRed)}
+        "lightgreen"   => {Ok(Color::LightGreen)}
+        "lightyellow"  => {Ok(Color::LightYellow)}
+        "lightblue"    => {Ok(Color::LightBlue)}
         "lightmagenta" => {Ok(Color::LightMagenta)}
-        "lightcyan" => {Ok(Color::LightCyan)}
-        "white" => {Ok(Color::White)}
+        "lightcyan"    => {Ok(Color::LightCyan)}
+        "white"        => {Ok(Color::White)}
         _ => {
             Err(String::from("No such color. Try /help colors"))
         }

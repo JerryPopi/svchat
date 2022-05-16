@@ -1,0 +1,7 @@
+#!/bin/zsh
+
+cargo build
+
+alacritty -e target/debug/svchat -s &
+alacritty -e target/debug/svchat &
+alacritty -e target/debug/svchat &

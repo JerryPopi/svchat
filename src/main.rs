@@ -1,10 +1,11 @@
 mod server;
 mod client;
-mod message;
+mod structs;
 mod events;
+mod config;
 
 use std::{
-    process::exit,
+    process::exit, fs,
 };
 
 use clap::{App, Arg};
@@ -26,21 +27,21 @@ fn main() -> std::io::Result<()> {
             Arg::with_name("address")
                 .short("a")
                 .long("address")
-                .help("Sets address to connect to")
+                .help("Sets address to connect to (defaults to localhost)")
                 .takes_value(true),
         )
         .arg(
             Arg::with_name("port")
                 .short("p")
                 .long("port")
-                .help("Sets port to connect to")
+                .help("Sets port to connect to (defaults to 6000)")
                 .takes_value(true),
         )
         .arg(
             Arg::with_name("username")
                 .short("u")
                 .long("username")
-                .help("Username to be identified with")
+                .help("Username to be identified with (defaults to hostname of machine)")
                 .takes_value(true),
         )
         .arg(
@@ -61,17 +62,25 @@ fn main() -> std::io::Result<()> {
         let port = matches.value_of("port").unwrap_or("6000");
         let address = ip.to_string() + ":" + port;
         let username = matches.value_of("username").unwrap_or(&gethostname().into_string().unwrap()).to_string();
+
         if username.is_empty() {
             println!("Must enter username <-u username>");
             exit(0);
         }
+
+        let mut config: config::Config = config::Config::default();
+        if matches.is_present("config") {
+            let config_raw = fs::read_to_string(matches.value_of("config").unwrap_or("~/.config/svchat/svchat.toml")).unwrap();
+            config = toml::from_str(&config_raw).unwrap();
+        }
+
         println!(
             "Connecting {} to {}",
             username,
             address.to_string() + &":".to_string() + port
         );
-        // client::start(address, client::Client { name: vec!['a', 'b', 'c'] })?;
-        client::start(address, username).unwrap();
+
+        client::start(address, username, config).unwrap();
     }
 
     Ok(())
