@@ -1,7 +1,6 @@
 mod server;
 mod client;
 mod structs;
-mod events;
 mod config;
 
 use std::{
