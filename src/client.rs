@@ -1,19 +1,17 @@
-#![allow(unused_imports)]
-
-use std::{convert::TryInto, error::Error, io::{self, ErrorKind, Read, Write}, mem::size_of_val, net::TcpStream, process::exit, sync::{Arc, Mutex, MutexGuard, mpsc}, thread::{self, sleep}, time::{Duration, SystemTime, UNIX_EPOCH}};
+use std::{error::Error, io::{self, ErrorKind, Read, Write}, mem::size_of_val, net::TcpStream, process::exit, sync::{Arc, Mutex, MutexGuard, mpsc}, thread::{self, sleep}, time::{Duration}};
 use chrono::{DateTime, Local, Utc};
-use termion::{event::Key, input::{MouseTerminal, TermRead}, raw::IntoRawMode, screen::AlternateScreen};
+use crossterm::{self, event::{KeyCode, read, Event}};
 use tui::{
-    backend::TermionBackend,
+    backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
-    style::{Color, Modifier, Style},
-    text::{Span, Spans, Text},
+    style::{Color, Style},
+    text::{Span, Spans},
     widgets::{Block, Borders, List, ListItem, Paragraph},
     Terminal,
 };
 use unicode_width::UnicodeWidthStr;
 
-use crate::{structs::{Msg, ConnectionRequest, MsgType, MessageWrapper}, events::*, config::Config};
+use crate::{structs::{Msg, ConnectionRequest, MsgType, MessageWrapper}, config::Config};
 
 const COLOR_INFO: Color = Color::LightBlue;
 const COLOR_ERR: Color = Color::LightRed;
@@ -96,13 +94,12 @@ pub fn start(addr: String, username: String, config: Config) -> Result<(), Box<d
 	let mut stream = TcpStream::connect(addr).expect("Failed to connect to server.");
 	stream.set_nonblocking(true)?;
 
-	let stdout = io::stdout().into_raw_mode()?;
-	let stdout = MouseTerminal::from(stdout);
-	let stdout = AlternateScreen::from(stdout);
-	let backend = TermionBackend::new(stdout);
+	let stdout = io::stdout();
+	
+    let backend = CrosstermBackend::new(stdout);
 	let mut terminal = Terminal::new(backend)?;
 
-	let events = Events::new();
+	// let events = Events::new();
 
 	let app = Arc::new(Mutex::new(App::default()));
 	
@@ -209,29 +206,32 @@ pub fn start(addr: String, username: String, config: Config) -> Result<(), Box<d
             drop(app_t);
         })?;
 
+        let mut app_t = app.lock().unwrap();
+        
         // Handle input
-        if let Event::Input(input) = events.next()? {
-            let mut app_t = app.lock().unwrap();
-            match input {
-                Key::Ctrl('c') => {
-                    break;
-                }
-                Key::Char('\n') => {
-                    let msg = app_t.input.drain(..).collect();
-                    let parse = parse_message(msg, shared_tx.lock().unwrap(), client.lock().unwrap());
-                    if parse.should_print {
-                        let cl = client.lock().unwrap();
-                        app_t.messages.push(Msg{sender: (&cl.name).to_string(), content: parse.content, color: parse.color, timestamp: Utc::now()});
+        match read()? {
+            Event::Key(event) => {
+                match event.code {
+                    KeyCode::Char('c') => break,
+                    KeyCode::Enter => {
+                        let msg = app_t.input.drain(..).collect();
+                        let parse = parse_message(msg, shared_tx.lock().unwrap(), client.lock().unwrap());
+                        if parse.should_print {
+                            let cl = client.lock().unwrap();
+                            app_t.messages.push(Msg{sender: (&cl.name).to_string(), content: parse.content, color: parse.color, timestamp: Utc::now()});
+                        }
+                    },
+                    KeyCode::Backspace => {
+                        app_t.input.pop();
+                    },
+                    KeyCode::Char(c) => {
+                        app_t.input.push(c);
                     }
-                },
-                Key::Backspace => {
-                    app_t.input.pop();
-                },
-                Key::Char(c) => {
-                    app_t.input.push(c);
-                },
-                _ => {}
-            }
+                    _ => {}
+                }
+            },
+            Event::Mouse(_event) => {},
+            Event::Resize(_w, _h) => {}
         }
 	}
     terminal.clear().unwrap();

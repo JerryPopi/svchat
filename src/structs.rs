@@ -1,12 +1,12 @@
-use std::net::TcpStream;
+use std::{net::{TcpStream, SocketAddr}, collections::HashMap};
 
 use chrono::{DateTime, Utc};
 use serde::{Serialize, Deserialize};
 use tui::style::Color;
 
 pub struct Connection {
-	stream: TcpStream,
-	username: String
+	pub(crate) stream: TcpStream,
+	pub(crate) username: String
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -44,4 +44,21 @@ impl Default for Msg {
 pub struct ConnectionRequest {
 	pub username: String,
 	pub room: String
+}
+
+#[derive(Clone)]
+pub struct RoomList {
+	pub rooms: HashMap<String, Room>
+}
+
+impl Default for RoomList {
+	fn default() -> Self {
+        Self { rooms: Default::default() }
+    }
+}
+
+#[derive(Clone)]
+pub struct Room {
+	pub clients: Vec<SocketAddr>,
+	//todo room options
 }
