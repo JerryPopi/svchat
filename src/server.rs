@@ -1,8 +1,8 @@
 use std::{net::{SocketAddr, TcpListener, TcpStream}, io::{ErrorKind, Read, Write}, sync::{Arc, Mutex, mpsc}, thread::{self, sleep}, time::Duration, collections::HashMap, mem::size_of_val};
 
-use crate::structs::{Msg, MessageWrapper, MsgType, Connection, ConnectionRequest, Room, RoomList};
+use crate::structs::{Msg, MessageWrapper, MsgType, Connection, ConnectionRequest, RoomList};
 
-fn handle_client(mut stream: TcpStream, addr: SocketAddr, tx: mpsc::Sender<Msg>, roomlist: RoomList) {
+fn handle_client(mut stream: TcpStream, addr: SocketAddr, tx: mpsc::Sender<Msg>, roomlist: &mut RoomList<'a>) {
 	thread::spawn(move || loop {
 		let mut buf_sz = [0; std::mem::size_of::<usize>()];
 		
@@ -19,7 +19,8 @@ fn handle_client(mut stream: TcpStream, addr: SocketAddr, tx: mpsc::Sender<Msg>,
 							MsgType::ConnectionRequest => {
 								let request: ConnectionRequest = serde_json::from_str(&wrapped_msg.msg).unwrap();
 								if roomlist.rooms.contains_key(&request.room) {
-									//todo handle client assignment to room
+									// TODO handle client assignment to room
+									roomlist.rooms.get_mut(&request.room).unwrap().add_user(addr);
 								}
 							}
 							MsgType::Message => {
@@ -51,6 +52,7 @@ pub fn start(port: &str) -> std::io::Result<()>{
 	listener.set_nonblocking(true)?;
 
 	let roomlist = RoomList::default();
+	let userlist
 
 	let mut clients: HashMap<std::net::SocketAddr, Connection> = HashMap::new();
 
@@ -61,13 +63,12 @@ pub fn start(port: &str) -> std::io::Result<()>{
 	loop {
 		if let Ok((socket, addr)) = listener.accept(){
 			println!("Client connected! {}", addr);
-			// let address = addr.ip();
 
 			clients.insert(addr, Connection {
 				stream: socket.try_clone().expect("Failed to clone client"),
     			username: String::new(),
 			});
-			handle_client(socket, addr, shared_tx.lock().unwrap().clone(), roomlist.clone());
+			handle_client(socket, addr, shared_tx.lock().unwrap().clone(), &mut roomlist);
 		}
 
 		if let Ok(msg) = rx.try_recv() {
