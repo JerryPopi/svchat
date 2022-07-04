@@ -47,18 +47,25 @@ pub struct ConnectionRequest {
 }
 
 #[derive(Clone)]
-pub struct RoomList {
-	pub rooms: HashMap<String, Room>
+pub struct Room {
+	pub clients: Vec<SocketAddr>,
+	//todo room options
 }
 
-impl Default for RoomList {
+impl Room {
+	pub fn add_user(&mut self, user: SocketAddr) {
+		self.clients.push(user);
+	}
+}
+
+#[derive(Clone)]
+pub struct RoomList<'a> {
+	pub rooms: &'a HashMap<String, Room>
+}
+
+impl Default for RoomList<'a> {
 	fn default() -> Self {
         Self { rooms: Default::default() }
     }
 }
 
-#[derive(Clone)]
-pub struct Room {
-	pub clients: Vec<SocketAddr>,
-	//todo room options
-}

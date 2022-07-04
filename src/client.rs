@@ -13,9 +13,9 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::{structs::{Msg, ConnectionRequest, MsgType, MessageWrapper}, config::Config};
 
-const COLOR_INFO: Color = Color::LightBlue;
-const COLOR_ERR: Color = Color::LightRed;
-const COLORS: [&str; 16] = ["black", "red","green", "yellow", "blue", "magenta", "cyan", "gray", "darkgray", "lightred", "lightgreen", "lightyellow", "lightblue", "lightmagenta", "lightcyan", "white"];
+pub const COLOR_INFO: Color = Color::LightBlue;
+pub const COLOR_ERR: Color = Color::LightRed;
+pub const COLORS: [&str; 16] = ["black", "red","green", "yellow", "blue", "magenta", "cyan", "gray", "darkgray", "lightred", "lightgreen", "lightyellow", "lightblue", "lightmagenta", "lightcyan", "white"];
 
 pub struct Client {
 	pub name: String,
@@ -47,7 +47,7 @@ impl Default for App {
 	}
 }
 
-struct Parsed {
+pub struct Parsed {
     should_print: bool,
     content: String,
     color: Color
@@ -81,6 +81,7 @@ fn request_connection(username: &str, room: String, stream: &mut TcpStream) -> R
     return Ok(());
 }
 
+// TODO implement config files
 pub fn start(addr: String, username: String, config: Config) -> Result<(), Box<dyn Error>> {
 	ctrlc::set_handler(move || {
 		println!("Exiting...");
@@ -108,7 +109,9 @@ pub fn start(addr: String, username: String, config: Config) -> Result<(), Box<d
 
     let shared_tx = Arc::new(Mutex::new(tx));
 
-    request_connection(username, String::from("room"), &mut stream)?;
+
+    // TODO this should default to _default, but otherwise should use last joined room or specified in :open command
+    request_connection(username, String::from("_default"), &mut stream)?;
 
     thread::spawn(move || loop {
 		let mut buf_sz = [0; std::mem::size_of::<usize>()];
@@ -247,124 +250,124 @@ fn parse_message(msg: String, tx: MutexGuard<mpsc::Sender<Msg>>, mut client: Mut
 
         match cmd[0] {
             "help" => {
-                if cmd.len() != 2 {
-                    Parsed {
-                        should_print: true,
-                        content: format!("Available commands: /help, /nick <nickname>, /color <color>"),
-                        color: COLOR_INFO
-                    }
-                } else {
-                    match cmd[1] {
-                        "nick" => {
-                            Parsed {
-                                should_print: true,
-                                content: format!("Usage of nick: /nick <nickname>"),
-                                color: COLOR_INFO
-                            }
-                        },
-                        "color" => {
-                            Parsed {
-                                should_print: true,
-                                content: format!("Available colors: {}", COLORS.join(", ")),
-                                color: COLOR_INFO
-                            }
-                        },
-                        _ => {
-                            Parsed {
-                                should_print: true,
-                                content: format!("Available commands: /help, /nick <nickname>, /color <color>"),
-                                color: COLOR_INFO
-                            }
+            if cmd.len() != 2 {
+                Parsed {
+                    should_print: true,
+                    content: format!("Available commands: /help, /nick <nickname>, /color <color>"),
+                    color: COLOR_INFO
+                }
+            } else {
+                match cmd[1] {
+                    "nick" => {
+                        Parsed {
+                            should_print: true,
+                            content: format!("Usage of nick: /nick <nickname>"),
+                            color: COLOR_INFO
+                        }
+                    },
+                    "color" => {
+                        Parsed {
+                            should_print: true,
+                            content: format!("Available colors: {}", COLORS.join(", ")),
+                            color: COLOR_INFO
+                        }
+                    },
+                    _ => {
+                        Parsed {
+                            should_print: true,
+                            content: format!("Available commands: /help, /nick <nickname>, /color <color>"),
+                            color: COLOR_INFO
                         }
                     }
                 }
             }
-            "nick" => {
-                if cmd.len() != 2 {
-                    return Parsed {
-                        should_print: true,
-                        content: format!("Incorrect usage of command! /nick <name>"),
-                        color: COLOR_ERR
-                    }
-                }
-                let arg = cmd[1];
-                client.name = String::from(arg);
+        }
+        "nick" => {
+            if cmd.len() != 2 {
                 return Parsed {
                     should_print: true,
-                    content: format!("Changed name to: {}", &client.name),
-                    color: COLOR_INFO
-                }
-            }
-            "info" => {
-                return Parsed {
-                    should_print: true,
-                    content: (*client.name).to_string(),
-                    color: COLOR_INFO
-                }
-            }
-            "open" => todo!(),
-            "remote-color" => {
-                if cmd.len() != 2 {
-                    return Parsed {
-                        should_print: true,
-                        content: format!("Incorrect usage of command! /remote-color <color>"),
-                        color: COLOR_ERR
-                    }
-                }
-                let arg = cmd[1];
-                let out_str: String;
-                let mut color = Color::White;
-                match color_from_name(arg) {
-                    Ok(_color) => {
-                        out_str = String::from("Changed color to ".to_owned() + arg);
-                        color = _color;
-                    }
-                    Err(e) => {
-                        out_str = e;
-                    }
-                }
-                client.remote_color = color;
-                return Parsed {
-                    should_print: true,
-                    content: out_str,
-                    color,
-                }
-            }
-            "local-color" => {
-                if cmd.len() != 2 {
-                    return Parsed {
-                        should_print: true,
-                        content: String::from("Incorrect usage of command! /local-color <color>"),
-                        color: COLOR_ERR
-                    }
-                }
-                let arg = cmd[1];
-                let out_str: String;
-                let mut color = Color::White;
-                match color_from_name(arg) {
-                    Ok(_color) => {
-                        out_str = String::from("Changed color to ".to_owned() + arg);
-                        color = _color;
-                    }
-                    Err(e) => {
-                        out_str = e;
-                    }
-                }
-                client.local_color = color;
-                return Parsed {
-                    should_print: true,
-                    content: out_str,
-                    color,
-                }
-            }
-            _ => {
-                Parsed {
-                    should_print: true,
-                    content: String::from("Unknown command. Try /help"),
+                    content: format!("Incorrect usage of command! /nick <name>"),
                     color: COLOR_ERR
                 }
             }
+            let arg = cmd[1];
+            client.name = String::from(arg);
+            return Parsed {
+                should_print: true,
+                content: format!("Changed name to: {}", &client.name),
+                color: COLOR_INFO
+            }
         }
+        "info" => {
+            return Parsed {
+                should_print: true,
+                content: (*client.name).to_string(),
+                color: COLOR_INFO
+            }
+        }
+        "open" => todo!(),
+        "remote-color" => {
+            if cmd.len() != 2 {
+                return Parsed {
+                    should_print: true,
+                    content: format!("Incorrect usage of command! /remote-color <color>"),
+                    color: COLOR_ERR
+                }
+            }
+            let arg = cmd[1];
+            let out_str: String;
+            let mut color = Color::White;
+            match color_from_name(arg) {
+                Ok(_color) => {
+                    out_str = String::from("Changed color to ".to_owned() + arg);
+                    color = _color;
+                }
+                Err(e) => {
+                    out_str = e;
+                }
+            }
+            client.remote_color = color;
+            return Parsed {
+                should_print: true,
+                content: out_str,
+                color,
+            }
+        }
+        "local-color" => {
+            if cmd.len() != 2 {
+                return Parsed {
+                    should_print: true,
+                    content: String::from("Incorrect usage of command! /local-color <color>"),
+                    color: COLOR_ERR
+                }
+            }
+            let arg = cmd[1];
+            let out_str: String;
+            let mut color = Color::White;
+            match color_from_name(arg) {
+                Ok(_color) => {
+                    out_str = String::from("Changed color to ".to_owned() + arg);
+                    color = _color;
+                }
+                Err(e) => {
+                    out_str = e;
+                }
+            }
+            client.local_color = color;
+            return Parsed {
+                should_print: true,
+                content: out_str,
+                color,
+            }
+        }
+        _ => {
+            Parsed {
+                should_print: true,
+                content: String::from("Unknown command. Try /help"),
+                color: COLOR_ERR
+            }
+        }
+    }
     } else {
         tx.send(Msg{content: msg.clone().to_owned(), 
             sender: (*client.name).to_string().to_owned(), 
